@@ -83,32 +83,46 @@ st.markdown("""
 # ============================================================================
 @st.cache_data(ttl=300)
 def descargar_datos(ticker_symbol, periodo="1y"):
-    """Descarga datos de Yahoo Finance evadiendo el bloqueo de IP de Streamlit Cloud."""
+    """Descarga datos de Yahoo Finance evadiendo el bloqueo extremo de IP."""
+    import requests # Nos aseguramos de que requests esté disponible aquí
+    
     try:
-        # 1. Crear una sesión personalizada simulando ser Google Chrome
+        # 1. Sesión con headers extremadamente detallados para engañar al WAF de Yahoo
         session = requests.Session()
         session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Accept": "*/*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
             "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive"
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0"
         })
         
-        # 2. Descargar usando el objeto Ticker y nuestra sesión falsa
-        activo = yf.Ticker(ticker_symbol, session=session)
-        datos = activo.history(period=periodo)
+        # 2. Usamos yf.download pasándole nuestra sesión blindada
+        datos = yf.download(tickers=ticker_symbol, period=periodo, session=session, progress=False)
         
-        # 3. Validar si llegaron datos
+        # 3. Validar que la tabla no esté vacía
         if datos is None or datos.empty:
             return None
             
-        # 4. Limpiar la zona horaria del índice (evita errores con SQLite y Plotly)
+        # 4. Aplanar columnas (yfinance 0.2.40+ devuelve un MultiIndex que rompe Plotly)
+        if isinstance(datos.columns, pd.MultiIndex):
+            datos.columns = datos.columns.get_level_values(0)
+            
+        # 5. Quitar zonas horarias para no tener conflictos con SQLite
         if datos.index.tz is not None:
             datos.index = datos.index.tz_localize(None)
             
         return datos
         
     except Exception as e:
+        # Si falla, no colapsa la app, solo muestra el error en amarillo
+        st.warning(f"El proveedor de datos bloqueó la conexión para {ticker_symbol}. Intenta de nuevo en unos minutos. Detalle: {e}")
         return None
 
 # ============================================================================
@@ -1822,4 +1836,5 @@ st.markdown("""
     <p>Docente: Mg. Ernesto David Cancho Rodríguez | Equipo 2</p>
 </div>
 """, unsafe_allow_html=True)
+
 
