@@ -14,6 +14,7 @@ import joblib
 import gc
 import datetime
 import warnings
+import requests #
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -82,28 +83,33 @@ st.markdown("""
 # ============================================================================
 @st.cache_data(ttl=300)
 def descargar_datos(ticker_symbol, periodo="1y"):
-    """Descarga datos de Yahoo Finance con caché de 5 minutos."""
+    """Descarga datos de Yahoo Finance evadiendo el bloqueo de IP de Streamlit Cloud."""
     try:
-        datos = yf.download(ticker_symbol, period=periodo, progress=False)
-        if datos.empty:
+        # 1. Crear una sesión personalizada simulando ser Google Chrome
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive"
+        })
+        
+        # 2. Descargar usando el objeto Ticker y nuestra sesión falsa
+        activo = yf.Ticker(ticker_symbol, session=session)
+        datos = activo.history(period=periodo)
+        
+        # 3. Validar si llegaron datos
+        if datos is None or datos.empty:
             return None
-        # Aplanar columnas si es MultiIndex
-        if isinstance(datos.columns, pd.MultiIndex):
-            datos.columns = datos.columns.get_level_values(0)
-        datos.index = pd.to_datetime(datos.index)
+            
+        # 4. Limpiar la zona horaria del índice (evita errores con SQLite y Plotly)
+        if datos.index.tz is not None:
+            datos.index = datos.index.tz_localize(None)
+            
         return datos
-    except Exception:
+        
+    except Exception as e:
         return None
-
-@st.cache_resource
-def cargar_modelo_pkl(ruta):
-    """Carga modelo .pkl una sola vez en memoria."""
-    try:
-        if os.path.exists(ruta):
-            return joblib.load(ruta)
-    except Exception:
-        pass
-    return None
 
 # ============================================================================
 # BASE DE DATOS - Inicialización y funciones CRUD
@@ -1816,3 +1822,4 @@ st.markdown("""
     <p>Docente: Mg. Ernesto David Cancho Rodríguez | Equipo 2</p>
 </div>
 """, unsafe_allow_html=True)
+
